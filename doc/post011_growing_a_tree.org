@@ -1,0 +1,192 @@
+#+BLOG: noise on the net
+#+POSTID: 351
+#+ORG2BLOG:
+#+DATE: [2024-03-16 sab 17:05]
+#+OPTIONS: toc:nil num:nil todo:nil pri:nil tags:nil ^:nil
+#+CATEGORY: Language learning
+#+TAGS: Rust
+#+DESCRIPTION: An introduction to binary trees in rust
+#+title: Growing A (Binary) Tree in Rust
+
+file:images/toa-heftiba-W1yjvf5idqA-unsplash_reduced.jpg
+
+Photo by [[https://unsplash.com/@heftiba?utm_content=creditCopyText&utm_medium=referral&utm_source=unsplash][Toa Heftiba]] on [[https://unsplash.com/photos/green-leafed-plant-photography-W1yjvf5idqA?utm_content=creditCopyText&utm_medium=referral&utm_source=unsplash][Unsplash]]
+
+The code for this post is [[https://github.com/noiseOnTheNet/post011_growing_a_tree][here]]
+
+* What is a binary tree
+A tree is a data structure, familiar to most developers; it is composed at least
+of a "root" node which is its entry point. Each node can have one or many or no
+"chidren" nodes, so this is a kind of graph. Unlike other graphs however,
+"children" nodes in trees won't have their "parents" as chidrens, nor any
+"ancestor". In other words this graph has no circular paths, which creates a
+"hierarchical" structure.
+
+#+BEGIN_SRC dot :file images/post011_rust_tree.png :exports results
+digraph {
+   rankdir = BT;
+   subgraph {
+        root [label="Root", shape="box"];
+        child1 [label="Child 1", shape="box"];
+        child2 [label="Child 2", shape="box"];
+        granchild1 [label="Granchild 1", shape="box"];
+        granchild2 [label="Granchild 2", shape="box"];
+        root -> child1
+        root -> child2
+        child2 -> granchild1
+        child2 -> granchild2
+        {rank = same; child1; child2;}
+        {rank = same; granchild1; granchild2;}
+   }
+}
+#+END_SRC
+
+#+RESULTS:
+[[file:images/post011_rust_tree.png]]
+
+
+If we draw this data structure with the root node in the bottom and chidren
+nodes above it looks like a plant, hence its name. We are going to grow a
+specific species of tree which has at maximum two "children" per each node: it
+is called "binary tree".
+
+Those nodes who don't have any childred are called "leaves" while those who have
+are called "branches".
+
+Binary trees are used in machine learning models or to sort data etc.
+* A naive example from C
+Those who programmed in languages in the C family know that to define a tree
+each data structure representing a node should "connect" to similar structures;
+this is why we call them "recursive" data structures.
+
+To avoid infinite "loops" C uses "pointers" to connect a parent node with its
+childrens, so a first attempt to create this structures in rust can be using references
+
+#+begin_src rust
+struct BTree0 {left : & BTree0, right : & BTree0}
+#+end_src
+
+In C missing childrens are represented by ~null~ pointers which are quite
+dangerous, so Rust uses the ~Option~ enumeration to represent possibly missing data.
+An ~Option~ can be either ~None~ or ~Some(thing)~.
+
+#+begin_src rust
+struct BTree0 {left : Option<& BTree0>, right : Option<& BTree0>}
+#+end_src
+
+The compiler need to be sure that each reference to ~BTree0~ node lives as long
+as the parent node, so we need to add a lifetime signature
+#+begin_src rust
+struct BTree0<'a> {left : Option<& 'a BTree0<'a>>, right : Option<& 'a BTree0<'a>>}
+#+end_src
+
+let's derive the ~Debug~ trait to print this data structure
+#+begin_src rust
+#[derive(Debug)]
+struct BTree0<'a> {left : Option<& 'a BTree0<'a>>, right : Option<& 'a BTree0<'a>>}
+#+end_src
+
+Now we can create some structure and print it:
+#+begin_src rust
+fn main() {
+    // create a leaf node in this scope
+    let test0 : BTree0 = BTree0 { left: None, right: None };
+
+    // create the root node and join the leaf
+    let test : BTree0 = BTree0 { left: Some(& test0), right: None };
+
+    // print it!
+    println!("Hello, world! {:?}", test);
+}
+#+end_src
+
+Nice huh? Yes but this is not enough.
+* Why the example doesn't actually work
+
+Recursive data structures are usually created by recursive function calls, i.e.
+functions which are calling themselves. Let's make a toy example.
+
+#+begin_src rust
+fn main() {
+    // create a leaf node in this scope
+    let test0 : BTree0=BTree0 { left: None, right: None };
+
+    // create a branch calling a recursive function
+    let test1 = add_test(false);
+
+    // create the root node and join the leaf
+    let test : BTree0 = BTree0 { left: Some(& test0), right: Some(& test1) };
+
+    // print it!
+    println!("Hello, world! {:?}", test);
+}
+
+fn add_test<'a>(stop : bool) -> BTree0<'a>{
+    let value = BTree0 {
+        left: (if stop {
+                   // stops recursion
+                   None
+               } else {
+                   // calls itself but stop after next call
+                   let branch = add_test(true);
+                   Some (& branch)
+               }),
+        right: None
+    };
+    return value;
+}
+#+end_src
+
+while the code is syntactically correct the ~branch~ variable does not live as
+much as the ~value~ which holds it.
+
+Why? because this variable is created in the stack frame of this function call,
+which will be wiped away as soon as the function returns.
+* Grow a tree in a box
+So the whole point is to create a node outside of the process stack, i.e. in the heap.
+
+The ~Box~ object provided by the standard library does exactly this.
+
+#+begin_src rust
+#[derive(Debug)]
+struct BTree1 {left : Option<Box<BTree1>>, right : Option<Box<BTree1>>}
+#+end_src
+
+this code now compiles and works:
+
+#+begin_src rust
+fn main() {
+    // create a leaf node in this scope
+    let test0 : BTree1 = BTree1 { left: None, right: None };
+
+    // create a branch calling a recursive function
+    let test1 = add_test(false);
+
+    // create the root node and join the leaf
+    let test : BTree1 = BTree1 { left: Some(Box::new(test0)), right: Some(Box::new(test1)) };
+
+    // print it!
+    println!("Hello, world! {:?}", test);
+}
+
+fn add_test<'a>(stop : bool) -> BTree1{
+    let value = BTree1 {
+        left: (
+            if stop {
+                // stops recursion
+                None
+            } else {
+                // calls itself but stop after next call
+                let branch = add_test(true); Some (Box::new(branch))
+            }),
+        right: None
+    };
+    return value;
+}
+#+end_src
+
+the ~new~ method of the ~Box~ trait creates the object in the heap; the compiler
+deletes it only when it is no more needed.
+# images/post011_rust_tree.png https://noiseonthenet.space/noise/wp-content/uploads/2024/03/post011_rust_tree.png
+
+# images/toa-heftiba-W1yjvf5idqA-unsplash_reduced.jpg https://noiseonthenet.space/noise/wp-content/uploads/2024/03/toa-heftiba-W1yjvf5idqA-unsplash_reduced.jpg
